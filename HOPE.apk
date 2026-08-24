@@ -1,0 +1,524 @@
+name: HOPE - Self Healing Flutter APK Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ============================================================
+      # FIND / EXTRACT / NORMALIZE
+      # ============================================================
+
+      - name: Find or extract Flutter project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="$GITHUB_WORKSPACE"
+          TEMP="$RUNNER_TEMP/hope-work"
+
+          rm -rf "$TEMP"
+          mkdir -p "$TEMP"
+
+          echo "=============================================="
+          echo "HOPE PROJECT DISCOVERY"
+          echo "=============================================="
+          echo "Repository: $REPO"
+
+          find_pubspec() {
+            find "$1" \
+              -type f \
+              -name "pubspec.yaml" \
+              -not -path "*/.git/*" \
+              -not -path "*/build/*" \
+              -not -path "*/.dart_tool/*" \
+              2>/dev/null
+          }
+
+          PUBSPEC="$(find_pubspec "$REPO" | head -n 1 || true)"
+          SOURCE_MODE="direct"
+
+          # ----------------------------------------------------------
+          # If no Flutter project exists directly, search ZIP archives.
+          # ----------------------------------------------------------
+
+          if [ -z "$PUBSPEC" ]; then
+            SOURCE_MODE="zip"
+
+            echo ""
+            echo "No pubspec.yaml found directly."
+            echo "Searching for ZIP archives..."
+
+            mapfile -t ZIPS < <(
+              find "$REPO" \
+                -type f \
+                -iname "*.zip" \
+                -not -path "*/.git/*" \
+                2>/dev/null \
+                | sort
+            )
+
+            if [ "${#ZIPS[@]}" -eq 0 ]; then
+              echo "::error::No Flutter project and no ZIP archive were found."
+              exit 1
+            fi
+
+            echo "ZIP archives found:"
+            printf ' - %s\n' "${ZIPS[@]}"
+
+            INDEX=0
+
+            extract_zip() {
+              local ARCHIVE="$1"
+              local DEST="$2"
+
+              mkdir -p "$DEST"
+
+              python3 - "$ARCHIVE" "$DEST" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          archive = Path(sys.argv[1]).resolve()
+          destination = Path(sys.argv[2]).resolve()
+
+          destination.mkdir(parents=True, exist_ok=True)
+
+          with zipfile.ZipFile(archive, "r") as z:
+              for member in z.infolist():
+                  target = (destination / member.filename).resolve()
+
+                  if target != destination and not str(target).startswith(
+                      str(destination) + "/"
+                  ):
+                      raise RuntimeError(
+                          f"Unsafe ZIP path detected: {member.filename}"
+                      )
+
+                  z.extract(member, destination)
+          PY
+            }
+
+            for ZIP in "${ZIPS[@]}"; do
+              INDEX=$((INDEX + 1))
+
+              DEST="$TEMP/archive-$INDEX"
+
+              echo ""
+              echo "Extracting:"
+              echo "$ZIP"
+
+              extract_zip "$ZIP" "$DEST"
+            done
+
+            # --------------------------------------------------------
+            # Support nested ZIP files up to 5 levels.
+            # --------------------------------------------------------
+
+            for LEVEL in 1 2 3 4 5; do
+              PUBSPEC="$(find_pubspec "$TEMP" | head -n 1 || true)"
+
+              if [ -n "$PUBSPEC" ]; then
+                break
+              fi
+
+              mapfile -t NESTED < <(
+                find "$TEMP" \
+                  -type f \
+                  -iname "*.zip" \
+                  -not -path "*/.git/*" \
+                  2>/dev/null \
+                  | sort
+              )
+
+              if [ "${#NESTED[@]}" -eq 0 ]; then
+                break
+              fi
+
+              echo ""
+              echo "Nested ZIP level $LEVEL detected."
+
+              N=0
+
+              for ZIP in "${NESTED[@]}"; do
+                N=$((N + 1))
+                DEST="$TEMP/nested-$LEVEL-$N"
+
+                echo "Extracting nested archive:"
+                echo "$ZIP"
+
+                extract_zip "$ZIP" "$DEST"
+              done
+            done
+
+            PUBSPEC="$(find_pubspec "$TEMP" | head -n 1 || true)"
+          fi
+
+          # ----------------------------------------------------------
+          # Validate Flutter project.
+          # ----------------------------------------------------------
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "::error::pubspec.yaml was not found after scanning/extraction."
+
+            echo ""
+            echo "Repository files:"
+            find "$REPO" -maxdepth 5 -type f \
+              -not -path "*/.git/*" \
+              | sort \
+              | head -500
+
+            echo ""
+            echo "Temporary extracted files:"
+            find "$TEMP" -maxdepth 6 -type f \
+              | sort \
+              | head -1000
+
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          echo ""
+          echo "=============================================="
+          echo "FLUTTER PROJECT FOUND"
+          echo "=============================================="
+          echo "pubspec.yaml:"
+          echo "$PUBSPEC"
+          echo ""
+          echo "Project:"
+          echo "$PROJECT_DIR"
+          echo "=============================================="
+
+          test -f "$PROJECT_DIR/pubspec.yaml"
+          test -d "$PROJECT_DIR/lib"
+
+          if [ ! -d "$PROJECT_DIR/android" ]; then
+            echo "::error::Android directory was not found."
+            exit 1
+          fi
+
+          echo "SOURCE_MODE=$SOURCE_MODE" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # NORMALIZE ZIP PROJECT INTO GITHUB ROOT
+      # ============================================================
+
+      - name: Normalize extracted project into repository root
+        if: env.SOURCE_MODE == 'zip'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT="$PROJECT_DIR"
+          REPO="$GITHUB_WORKSPACE"
+          BACKUP="$RUNNER_TEMP/github-backup"
+
+          rm -rf "$BACKUP"
+          mkdir -p "$BACKUP"
+
+          # Preserve current GitHub workflows before normalization.
+          if [ -d "$REPO/.github" ]; then
+            cp -a "$REPO/.github" "$BACKUP/github"
+          fi
+
+          echo "Normalizing:"
+          echo "$PROJECT"
+          echo ""
+          echo "Into:"
+          echo "$REPO"
+
+          rsync -a \
+            --exclude=".git/" \
+            --exclude="build/" \
+            --exclude=".dart_tool/" \
+            "$PROJECT/" \
+            "$REPO/"
+
+          # Restore current workflow definitions so this workflow
+          # remains available after normalization.
+          if [ -d "$BACKUP/github" ]; then
+            rm -rf "$REPO/.github"
+            cp -a "$BACKUP/github" "$REPO/.github"
+          fi
+
+          # Remove uploaded ZIP archives from repository root.
+          find "$REPO" \
+            -maxdepth 1 \
+            -type f \
+            -iname "*.zip" \
+            -delete
+
+          echo ""
+          echo "Repository normalized."
+
+          test -f "$REPO/pubspec.yaml"
+          test -d "$REPO/lib"
+          test -d "$REPO/android"
+
+          echo "PROJECT_DIR=$REPO" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # JAVA
+      # ============================================================
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ============================================================
+      # FLUTTER
+      # ============================================================
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.1"
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      # ============================================================
+      # AUTOMATIC REPAIR
+      # ============================================================
+
+      - name: Automatic Dart repair
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "AUTOMATIC DART REPAIR"
+          echo "=============================================="
+
+          echo "Running dart fix..."
+          dart fix --apply
+
+          echo ""
+          echo "Running dart format..."
+          dart format --output=write .
+
+          # --------------------------------------------------------
+          # Defensive repair for the exact error seen in CI:
+          # const ArgumentError(...) is invalid when constructor
+          # is not const.
+          # --------------------------------------------------------
+
+          echo ""
+          echo "Checking for invalid const ArgumentError usage..."
+
+          mapfile -t DART_FILES < <(
+            find lib test integration_test \
+              -type f \
+              -name "*.dart" \
+              2>/dev/null \
+              | sort || true
+          )
+
+          for FILE in "${DART_FILES[@]}"; do
+            if grep -qE 'const[[:space:]]+ArgumentError[[:space:]]*\(' "$FILE"; then
+              echo "Repairing: $FILE"
+
+              sed -i -E \
+                's/const[[:space:]]+ArgumentError[[:space:]]*\(/ArgumentError(/g' \
+                "$FILE"
+            fi
+          done
+
+          echo ""
+          echo "Formatting again after targeted repair..."
+          dart format --output=write lib test integration_test 2>/dev/null || true
+
+          echo ""
+          echo "Automatic repair completed."
+
+      # ============================================================
+      # SHOW CHANGES
+      # ============================================================
+
+      - name: Show automatic changes
+        shell: bash
+        run: |
+          echo "=============================================="
+          echo "AUTOMATIC CHANGES"
+          echo "=============================================="
+
+          git status --short || true
+          echo ""
+
+          git diff --stat || true
+
+      # ============================================================
+      # ANALYZE AFTER AUTO-FIX
+      # ============================================================
+
+      - name: Flutter analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter analyze
+
+      # ============================================================
+      # TESTS
+      # ============================================================
+
+      - name: Flutter tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter test --coverage
+
+      # ============================================================
+      # COMMIT SELF-HEALING FIXES
+      # ============================================================
+
+      - name: Commit and push automatic fixes
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          cd "$GITHUB_WORKSPACE"
+
+          if git diff --quiet && \
+             [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          echo "Automatic changes detected."
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          git commit \
+            -m "fix: auto-repair Dart project [skip ci]" \
+            || true
+
+          if git diff --cached --quiet && \
+             git status --porcelain | grep -q .; then
+            echo "Changes were not committed."
+            exit 0
+          fi
+
+          echo "Pushing automatic repairs..."
+
+          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "Automatic repairs pushed successfully."
+          else
+            echo "::warning::Could not push automatic repair commit."
+            echo "The current build will continue using the repaired working tree."
+          fi
+
+      # ============================================================
+      # APK BUILD
+      # ============================================================
+
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter build apk --debug
+
+      # ============================================================
+      # FIND APK
+      # ============================================================
+
+      - name: Locate generated APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t APKS < <(
+            find "$PROJECT_DIR" \
+              -type f \
+              -name "*.apk" \
+              -not -path "*/.git/*" \
+              -not -path "*/.dart_tool/*" \
+              | sort
+          )
+
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "::error::No APK file was generated."
+            exit 1
+          fi
+
+          echo "APK files:"
+          printf ' - %s\n' "${APKS[@]}"
+
+          APK="${APKS[0]}"
+
+          echo ""
+          echo "Selected APK:"
+          echo "$APK"
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # UPLOAD APK
+      # ============================================================
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOPE-debug-apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+
+      # ============================================================
+      # SUMMARY
+      # ============================================================
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# HOPE APK Build"
+            echo ""
+            echo "## Project"
+            echo "\`$PROJECT_DIR\`"
+            echo ""
+            echo "## Source mode"
+            echo "\`$SOURCE_MODE\`"
+            echo ""
+            echo "## APK"
+            echo "\`$APK_PATH\`"
+            echo ""
+            echo "## Pipeline"
+            echo "- Automatic ZIP extraction"
+            echo "- Project normalization"
+            echo "- Dart automatic fixes"
+            echo "- Dart formatting"
+            echo "- Flutter analyze"
+            echo "- Flutter tests"
+            echo "- Debug APK build"
+            echo "- APK artifact upload"
+          } >> "$GITHUB_STEP_SUMMARY"
