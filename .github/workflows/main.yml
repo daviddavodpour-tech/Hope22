@@ -1,0 +1,326 @@
+name: HOPE - Auto Extract and Build APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect Flutter project or extract ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/hope-project"
+
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+
+          echo "=========================================="
+          echo "HOPE PROJECT DETECTOR"
+          echo "Repository:"
+          echo "$ROOT"
+          echo "=========================================="
+
+          # --------------------------------------------------
+          # 1. First check whether the repository already
+          #    contains a Flutter project.
+          # --------------------------------------------------
+
+          find_pubspec() {
+            find "$1" \
+              -type f \
+              -name "pubspec.yaml" \
+              -not -path "*/.git/*" \
+              -not -path "*/build/*" \
+              -not -path "*/.dart_tool/*" \
+              2>/dev/null
+          }
+
+          PUBSPEC="$(find_pubspec "$ROOT" | head -n 1 || true)"
+
+          # --------------------------------------------------
+          # 2. If no Flutter project exists directly in the
+          #    repository, find ZIP files and extract them.
+          # --------------------------------------------------
+
+          if [ -z "$PUBSPEC" ]; then
+
+            echo ""
+            echo "No pubspec.yaml found directly."
+            echo "Searching for ZIP archives..."
+
+            mapfile -t ZIPS < <(
+              find "$ROOT" \
+                -type f \
+                \( -iname "*.zip" \) \
+                -not -path "*/.git/*" \
+                2>/dev/null \
+                | sort
+            )
+
+            if [ "${#ZIPS[@]}" -eq 0 ]; then
+              echo "::error::No pubspec.yaml and no ZIP archive were found."
+              exit 1
+            fi
+
+            echo ""
+            echo "ZIP files found:"
+            printf ' - %s\n' "${ZIPS[@]}"
+
+            # Extract every discovered ZIP.
+            INDEX=0
+
+            for ZIP in "${ZIPS[@]}"; do
+              INDEX=$((INDEX + 1))
+
+              DEST="$WORK/archive-$INDEX"
+              mkdir -p "$DEST"
+
+              echo ""
+              echo "Extracting:"
+              echo "$ZIP"
+              echo "Into:"
+              echo "$DEST"
+
+              python3 - "$ZIP" "$DEST" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          archive = Path(sys.argv[1]).resolve()
+          destination = Path(sys.argv[2]).resolve()
+
+          destination.mkdir(parents=True, exist_ok=True)
+
+          with zipfile.ZipFile(archive, "r") as z:
+              for member in z.infolist():
+                  target = (destination / member.filename).resolve()
+
+                  if not str(target).startswith(str(destination) + "/") \
+                     and target != destination:
+                      raise RuntimeError(
+                          f"Unsafe ZIP path detected: {member.filename}"
+                      )
+
+                  z.extract(member, destination)
+          PY
+            done
+
+            # ------------------------------------------------
+            # 3. ZIPs can contain another ZIP.
+            #    Extract nested archives up to 5 levels.
+            # ------------------------------------------------
+
+            for LEVEL in 1 2 3 4 5; do
+
+              PUBSPEC="$(find_pubspec "$WORK" | head -n 1 || true)"
+
+              if [ -n "$PUBSPEC" ]; then
+                break
+              fi
+
+              mapfile -t NESTED_ZIPS < <(
+                find "$WORK" \
+                  -type f \
+                  -iname "*.zip" \
+                  2>/dev/null \
+                  | sort
+              )
+
+              if [ "${#NESTED_ZIPS[@]}" -eq 0 ]; then
+                break
+              fi
+
+              echo ""
+              echo "Nested ZIP level $LEVEL detected."
+
+              NESTED_INDEX=0
+
+              for ZIP in "${NESTED_ZIPS[@]}"; do
+                NESTED_INDEX=$((NESTED_INDEX + 1))
+
+                DEST="$WORK/nested-$LEVEL-$NESTED_INDEX"
+                mkdir -p "$DEST"
+
+                echo "Extracting nested archive:"
+                echo "$ZIP"
+
+                python3 - "$ZIP" "$DEST" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          archive = Path(sys.argv[1]).resolve()
+          destination = Path(sys.argv[2]).resolve()
+
+          with zipfile.ZipFile(archive, "r") as z:
+              for member in z.infolist():
+                  target = (destination / member.filename).resolve()
+
+                  if not str(target).startswith(str(destination) + "/") \
+                     and target != destination:
+                      raise RuntimeError(
+                          f"Unsafe ZIP path detected: {member.filename}"
+                      )
+
+                  z.extract(member, destination)
+          PY
+              done
+
+            done
+
+            PUBSPEC="$(find_pubspec "$WORK" | head -n 1 || true)"
+          fi
+
+          # --------------------------------------------------
+          # 4. Final validation.
+          # --------------------------------------------------
+
+          if [ -z "$PUBSPEC" ]; then
+            echo ""
+            echo "::error::Flutter project could not be found."
+            echo ""
+            echo "All discovered files:"
+            find "$ROOT" "$WORK" \
+              -maxdepth 6 \
+              -type f \
+              2>/dev/null \
+              | sort \
+              | head -1000
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          echo ""
+          echo "=========================================="
+          echo "FLUTTER PROJECT FOUND"
+          echo "=========================================="
+          echo "pubspec.yaml:"
+          echo "$PUBSPEC"
+          echo ""
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+          echo "=========================================="
+
+          if [ ! -d "$PROJECT_DIR/lib" ]; then
+            echo "::error::lib directory missing."
+            exit 1
+          fi
+
+          if [ ! -d "$PROJECT_DIR/android" ]; then
+            echo "::error::android directory missing."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Show detected project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Detected Flutter project:"
+          echo "$PROJECT_DIR"
+
+          echo ""
+          echo "Project root:"
+          find "$PROJECT_DIR" -maxdepth 2 -type f | sort | head -300
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.1"
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter analyze
+
+      - name: Flutter tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter test --coverage
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter build apk --debug
+
+      - name: Locate APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t APKS < <(
+            find "$PROJECT_DIR" \
+              -type f \
+              -name "*.apk" \
+              -not -path "*/.git/*" \
+              2>/dev/null \
+              | sort
+          )
+
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "::error::No APK was generated."
+            exit 1
+          fi
+
+          echo "APK files found:"
+          printf ' - %s\n' "${APKS[@]}"
+
+          APK="${APKS[0]}"
+
+          echo ""
+          echo "Selected APK:"
+          echo "$APK"
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOPE-debug-apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+
+      - name: Build summary
+        shell: bash
+        run: |
+          {
+            echo "# HOPE APK Build"
+            echo ""
+            echo "## Flutter project"
+            echo "$PROJECT_DIR"
+            echo ""
+            echo "## APK"
+            echo "$APK_PATH"
+            echo ""
+            echo "## Result"
+            echo "APK build completed successfully."
+          } >> "$GITHUB_STEP_SUMMARY"
