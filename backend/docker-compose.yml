@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hope
+      POSTGRES_USER: hope
+      POSTGRES_PASSWORD: hope
+    volumes:
+      - hope-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hope -d hope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hope-api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch(\"http://127.0.0.1:3000/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://hope:hope@postgres:5432/hope
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:?set ACCESS_TOKEN_SECRET}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?set REFRESH_TOKEN_SECRET}
+      ACCESS_TOKEN_TTL: 900
+      REFRESH_TOKEN_TTL: 2592000
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      STORAGE_DIR: /app/storage
+      MAX_UPLOAD_BYTES: 10485760
+      RATE_LIMIT_WINDOW_MS: 60000
+      AUTH_RATE_LIMIT_MAX: 10
+      TRUST_PROXY: "true"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+      ALLOWED_CORS_ORIGINS: ${ALLOWED_CORS_ORIGINS:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+      GENERAL_RATE_LIMIT_WINDOW_MS: 60000
+      GENERAL_RATE_LIMIT_MAX: 120
+      RESET_TOKEN_TTL: 900
+      RESET_TOKEN_DELIVERY_MODE: ${RESET_TOKEN_DELIVERY_MODE:?set RESET_TOKEN_DELIVERY_MODE}
+      RESET_TOKEN_DELIVERY_URL: ${RESET_TOKEN_DELIVERY_URL:?set RESET_TOKEN_DELIVERY_URL}
+    volumes:
+      - hope-storage:/app/storage
+
+volumes:
+  hope-postgres:
+  hope-storage:

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only overlay: keeps the production policy (no cleartext traffic) but
+  permits plain HTTP to the Android emulator host alias (10.0.2.2) and to
+  localhost for local development. This file lives under src/debug/res so it
+  is NEVER packaged into release builds.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

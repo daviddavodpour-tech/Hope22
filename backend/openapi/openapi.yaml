@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: HOPE API
+  version: 3.1.0
+  description: HOPE marketplace API contract. Payment routes expose the marketplace state machine; the configured payment provider is behind a provider boundary.
+servers:
+  - url: https://api.example.com/api/v1
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: object, properties: {code: {type: string}, message: {type: string}, requestId: {type: string}}}
+    Session:
+      type: object
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        user: {$ref: '#/components/schemas/User'}
+    User:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        displayName: {type: string}
+        role: {type: string}
+    Job:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: string}
+        categoryId: {type: string}
+        jobType: {type: string, enum: [FIXED, HOURLY, TASK]}
+        budgetType: {type: string, enum: [FIXED, RANGE]}
+        budgetMin: {type: number}
+        budgetMax: {type: number}
+        duration: {type: integer}
+        status: {type: string}
+    Offer:
+      type: object
+      properties: {id: {type: string}, jobId: {type: string}, providerId: {type: string}, price: {type: number}, status: {type: string}}
+    Payment:
+      type: object
+      properties: {id: {type: string}, jobId: {type: string}, amount: {type: number}, status: {type: string}, providerRef: {type: string, nullable: true}}
+    UploadIntent:
+      type: object
+      properties: {intentId: {type: string, format: uuid}, key: {type: string}, url: {type: string, format: uri}, uploadedBy: {type: string, format: uuid}}
+paths:
+  /ready:
+    get:
+      summary: Readiness probe
+      responses:
+        '200':
+          description: Service is ready
+        '503':
+          description: Dependency is unavailable
+  /health:
+    get: {responses: {'200': {description: Healthy}, '503': {description: Degraded}}}
+  /auth/register:
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email, password, displayName], properties: {email: {type: string}, password: {type: string, minLength: 8}, displayName: {type: string}}}}}}
+      responses: {'201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}}, '409': {description: Conflict}}
+  /auth/login:
+    post: {responses: {'200': {description: Session}, '401': {description: Unauthorized}}}
+  /auth/refresh:
+    post: {responses: {'200': {description: Rotated session}, '401': {description: Invalid or reused refresh token}}}
+  /auth/logout:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Logged out}}}
+  /auth/password-reset/request:
+    post: {responses: {'202': {description: Generic accepted response}, '503': {description: Delivery unavailable}}}
+  /auth/password-reset/confirm:
+    post: {responses: {'200': {description: Password changed}, '400': {description: Invalid or expired reset token}}}
+  /providers/me:
+    get: {security: [{bearerAuth: []}], responses: {'200': {description: Provider profile}}}
+  /categories:
+    get: {responses: {'200': {description: Categories}}}
+  /jobs:
+    get: {responses: {'200': {description: Job list}, '401': {description: Authentication required for private states}}}
+    post: {security: [{bearerAuth: []}], responses: {'201': {description: Created job}}}
+  /jobs/{id}:
+    get: {parameters: [{name: id, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Job}, '404': {description: Not found}}}
+  /jobs/{id}/publish:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Published}}}
+  /jobs/{id}/start:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Started}, '409': {description: Payment/state conflict}}}
+  /jobs/{id}/deliver:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Delivered}}}
+  /jobs/{id}/accept:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Completed}}}
+  /jobs/{id}/evidence:
+    post: {security: [{bearerAuth: []}], responses: {'201': {description: Evidence created}}}
+  /jobs/{id}/offers:
+    get: {security: [{bearerAuth: []}], responses: {'200': {description: Offers}}}
+  /offers:
+    post: {security: [{bearerAuth: []}], responses: {'201': {description: Offer created}, '409': {description: Duplicate pending offer}}}
+  /offers/{id}/accept:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Offer accepted}, '409': {description: Concurrent/invalid state}}}
+  /payments/jobs/{jobId}:
+    get: {security: [{bearerAuth: []}], parameters: [{name: jobId, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Payment status}}}
+  /payments/fund/{jobId}:
+    post: {security: [{bearerAuth: []}], parameters: [{name: jobId, in: path, required: true, schema: {type: string}}], responses: {'201': {description: Funded}, '200': {description: Idempotent replay}, '409': {description: State conflict}}}
+  /payments/release/{jobId}:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Released}, '409': {description: Payment state conflict}}}
+  /storage/upload:
+    post: {security: [{bearerAuth: []}], responses: {'201': {description: Uploaded}}}
+  /storage/presign:
+    post: {security: [{bearerAuth: []}], responses: {'200': {description: Presigned upload intent}, '409': {description: Direct upload unsupported}}}
+  /storage/complete:
+    post: {security: [{bearerAuth: []}], responses: {'201': {description: Completed upload}, '200': {description: Idempotent existing upload}, '403': {description: Invalid or unauthorized upload intent}, '410': {description: Expired intent}, '415': {description: Content type mismatch}}}

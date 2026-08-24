@@ -1,0 +1,44 @@
+{
+  "name": "hope-api",
+  "version": "3.5.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "migrate": "node src/migrate.js",
+    "seed": "node src/seed.js",
+    "test": "node --test --test-concurrency=1",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/db.js && node --check src/http.js && node --check src/observability.js",
+    "test:e2e": "node --test tests/e2e-flow.test.mjs",
+    "test:fast": "node --test tests/regression-static.test.mjs tests/repository-contract.test.mjs tests/security-provider-contract.test.mjs tests/security-hardening.test.mjs tests/security-runtime.test.mjs tests/storage-intent-contract.test.mjs tests/route-contract.mjs tests/workflow.test.mjs tests/relational-schema.test.mjs",
+    "test:s3": "node --test tests/s3-integration.test.mjs",
+    "test:contract": "node --test tests/observability-contract.test.mjs tests/outbox-contract.test.mjs tests/regression-static.test.mjs",
+    "test:perf": "node tests/perf-health.test.mjs",
+    "test:backup": "node --test tests/backup-contract.test.mjs",
+    "security:audit": "npm audit --audit-level=high",
+    "check:all": "npm run check && npm run test:fast && npm run test:contract && npm run test:backup"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "uuid": "^11.1.0",
+    "zod": "^4.0.17",
+    "@aws-sdk/client-s3": "^3.873.0",
+    "@aws-sdk/s3-request-presigner": "^3.873.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.5",
+    "supertest": "^7.1.4"
+  }
+}

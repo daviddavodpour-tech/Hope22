@@ -1,0 +1,43 @@
+{
+  "users": [],
+  "providers": [],
+  "refreshTokens": [],
+  "resetTokens": [],
+  "categories": [
+    {
+      "id": "8e4642f9-15f1-432c-b864-e13f3df8d922",
+      "slug": "writing",
+      "name": "نویسندگی و ترجمه",
+      "createdAt": "2026-08-23T12:36:43.237Z"
+    },
+    {
+      "id": "c7a67dad-af49-47a4-bd56-b9853280a4ba",
+      "slug": "design",
+      "name": "طراحی",
+      "createdAt": "2026-08-23T12:36:43.237Z"
+    },
+    {
+      "id": "537b67bd-7361-4f2e-a97a-7be2c5faa230",
+      "slug": "development",
+      "name": "برنامه‌نویسی",
+      "createdAt": "2026-08-23T12:36:43.237Z"
+    },
+    {
+      "id": "214a84fa-50db-474f-a0ed-c0ed1a0f302d",
+      "slug": "research",
+      "name": "پژوهش",
+      "createdAt": "2026-08-23T12:36:43.237Z"
+    },
+    {
+      "id": "fa08b971-30ec-44d5-a7c1-5a63da263008",
+      "slug": "education",
+      "name": "آموزش",
+      "createdAt": "2026-08-23T12:36:43.237Z"
+    }
+  ],
+  "jobs": [],
+  "offers": [],
+  "payments": [],
+  "evidence": [],
+  "audit": []
+}

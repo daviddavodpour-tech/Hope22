@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Kept inside the ~66dp safe zone at this viewport scale so it isn't
+         clipped by adaptive-icon masking on any launcher shape. -->
+    <path android:fillColor="#FFFFFF" android:pathData="M17,15h14v4H21v5h9v4H21v8h-4z" />
+</vector>
