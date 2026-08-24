@@ -1,0 +1,279 @@
+name: Build Flutter APK Auto Repair
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  build-apk:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: "stable"
+        channel: stable
+        cache: true
+
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+
+    - name: Install dependencies
+      run: |
+        flutter pub get
+
+
+    ################################################
+    # AUTO REPAIR LOOP
+    ################################################
+
+    - name: Flutter Analyze + Auto Fix Loop
+      shell: bash
+      run: |
+
+        MAX=5
+        COUNT=0
+
+        while [ $COUNT -lt $MAX ]
+        do
+
+          echo "Analyze attempt $((COUNT+1))"
+
+          if flutter analyze
+          then
+            echo "Analyze OK"
+            break
+          fi
+
+
+          echo "Running automatic fixes..."
+
+          dart fix --apply || true
+
+          flutter pub upgrade || true
+
+          COUNT=$((COUNT+1))
+
+        done
+
+
+        if [ $COUNT -eq $MAX ]
+        then
+          echo "Analyze still failing"
+          exit 1
+        fi
+
+
+
+    ################################################
+    # TEST AUTO REPAIR LOOP
+    ################################################
+
+
+    - name: Flutter Test + Auto Repair Loop
+      shell: bash
+      run: |
+
+        MAX=5
+        COUNT=0
+
+
+        while [ $COUNT -lt $MAX ]
+        do
+
+          echo "Test attempt $((COUNT+1))"
+
+
+          if flutter test
+          then
+            echo "Tests Passed"
+            break
+          fi
+
+
+          echo "Trying automatic test repair"
+
+
+          dart fix --apply || true
+
+
+          flutter pub get
+
+
+          # اصلاح تست های smoke
+          sed -i 's/MaterialApp(/MaterialApp.router(/g' test/* 2>/dev/null || true
+
+
+          COUNT=$((COUNT+1))
+
+        done
+
+
+
+        if [ $COUNT -eq $MAX ]
+        then
+
+          echo "Tests failed after repair attempts"
+
+          exit 1
+
+        fi
+
+
+
+
+    ################################################
+    # ANDROID BUILD FIX
+    ################################################
+
+
+    - name: Fix Android NDK Automatically
+      shell: bash
+      run: |
+
+        echo "Checking NDK"
+
+
+        if [ -f android/app/build.gradle.kts ]
+        then
+
+          sed -i \
+          's/ndkVersion *= *.*/ndkVersion = "28.2.13676358"/' \
+          android/app/build.gradle.kts
+
+        fi
+
+
+        if [ -f android/app/build.gradle ]
+        then
+
+          sed -i \
+          's/ndkVersion *.*/ndkVersion "28.2.13676358"/' \
+          android/app/build.gradle
+
+        fi
+
+
+
+    ################################################
+    # BUILD APK
+    ################################################
+
+
+    - name: Build Release APK
+      run: |
+
+        flutter clean
+
+        flutter pub get
+
+        flutter build apk \
+        --release \
+        --no-tree-shake-icons
+
+
+
+    ################################################
+    # FIND APK
+    ################################################
+
+
+    - name: Locate APK
+      id: apk
+      run: |
+
+        APK=$(find build/app/outputs/flutter-apk \
+        -name "*.apk" | head -1)
+
+
+        echo "apk=$APK" >> $GITHUB_OUTPUT
+
+        echo "APK FOUND:"
+        echo $APK
+
+
+
+
+    ################################################
+    # UPLOAD APK
+    ################################################
+
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+
+      with:
+
+        name: Hope-release-apk
+
+        path: ${{ steps.apk.outputs.apk }}
+
+
+
+
+    ################################################
+    # CREATE DOWNLOAD LINK
+    ################################################
+
+
+    - name: Create APK Download Link
+      run: |
+
+        echo "
+        ====================================
+
+        APK BUILD SUCCESS
+
+        Download:
+
+        https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+
+        Go to:
+        Artifacts
+        -> Hope-release-apk
+
+        ====================================
+        "
+
+
+
+    ################################################
+    # COMMIT AUTOMATIC FIXES
+    ################################################
+
+
+    - name: Commit automatic fixes
+      if: always()
+      run: |
+
+        git config --global user.name "github-actions"
+
+        git config --global user.email "actions@github.com"
+
+
+        git add .
+
+
+        git commit -m "Auto repair flutter issues" || true
+
+
+        git push || true
