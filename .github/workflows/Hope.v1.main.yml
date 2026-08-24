@@ -1,0 +1,290 @@
+name: Hope22 AI Auto Repair APK Builder
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+
+permissions:
+  contents: write
+
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+
+
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 17
+
+
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        cache: true
+
+
+
+    - name: Detect Flutter project
+      id: scan
+      shell: bash
+      run: |
+
+        PROJECT=$(find . \
+        -name pubspec.yaml \
+        -not -path "./.git/*" \
+        | head -1)
+
+
+        if [ -z "$PROJECT" ]; then
+          echo "Flutter project not found"
+          exit 1
+        fi
+
+
+        DIR=$(dirname "$PROJECT")
+
+        echo "project=$DIR" >> $GITHUB_OUTPUT
+
+        echo "Project:"
+        echo "$DIR"
+
+
+
+    - name: Flutter Doctor
+      run: |
+
+        flutter doctor -v
+
+
+
+    - name: Initial dependency setup
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter pub get || true
+
+
+
+    - name: Auto repair source code
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        dart fix --apply || true
+
+        dart format . || true
+
+
+
+    - name: Repair Android configuration
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+
+        GRADLE="android/app/build.gradle"
+
+        if [ -f "$GRADLE" ]; then
+
+
+          if grep -q "ndkVersion" "$GRADLE"; then
+
+            sed -i \
+            's/ndkVersion.*/ndkVersion "28.2.13676358"/' \
+            "$GRADLE"
+
+          else
+
+            sed -i \
+            '/android {/a\    ndkVersion "28.2.13676358"' \
+            "$GRADLE"
+
+          fi
+
+
+        fi
+
+
+        echo "Android repaired"
+
+
+
+    - name: Repair dependencies
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter pub upgrade || true
+
+        flutter pub get || true
+
+
+
+    - name: Analyze
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter analyze || true
+
+
+
+    - name: Auto Build Retry Engine
+      shell: bash
+      run: |
+
+
+        cd "${{ steps.scan.outputs.project }}"
+
+
+        MAX=3
+        COUNT=1
+
+
+        while [ $COUNT -le $MAX ]
+
+        do
+
+          echo "======================"
+
+          echo "BUILD TRY $COUNT / $MAX"
+
+          echo "======================"
+
+
+          flutter clean
+
+
+          flutter pub get
+
+
+          if flutter build apk \
+          --release \
+          --no-shrink
+
+          then
+
+            echo "BUILD SUCCESS"
+
+            exit 0
+
+          fi
+
+
+
+          echo "BUILD FAILED"
+
+          echo "Running repair cycle..."
+
+
+
+          dart fix --apply || true
+
+          dart format . || true
+
+
+          flutter pub upgrade || true
+
+
+
+          if [ -d android ]; then
+
+            cd android
+
+            chmod +x gradlew
+
+            ./gradlew clean || true
+
+            cd ..
+
+          fi
+
+
+
+          COUNT=$((COUNT+1))
+
+
+        done
+
+
+        echo "Build failed after repair attempts"
+
+        exit 1
+
+
+
+
+    - name: Locate APK
+      id: apk
+      shell: bash
+      run: |
+
+
+        APK=$(find "${{ steps.scan.outputs.project }}" \
+        -name "*.apk" \
+        | head -1)
+
+
+        if [ -z "$APK" ]; then
+
+          echo "APK missing"
+
+          exit 1
+
+        fi
+
+
+        echo "apk=$APK" >> $GITHUB_OUTPUT
+
+
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+
+        name: Hope22-final-release-apk
+
+        path:
+
+          ${{ steps.apk.outputs.apk }}
+
+
+
+    - name: Final Report
+      run: |
+
+        echo "# ✅ Hope22 APK Ready" >> $GITHUB_STEP_SUMMARY
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "APK ساخته شد." >> $GITHUB_STEP_SUMMARY
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "Download from Artifacts:" >> $GITHUB_STEP_SUMMARY
+
+        echo "Hope22-final-release-apk" >> $GITHUB_STEP_SUMMARY
