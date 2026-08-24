@@ -41,7 +41,9 @@ class UploadQueue {
         if (e is ApiException &&
             e.status != null &&
             e.status! >= 400 &&
-            e.status! < 500) break;
+            e.status! < 500) {
+          break;
+        }
         if (attempt < maxAttempts) {
           await Future<void>.delayed(Duration(milliseconds: 500 * attempt));
         }

@@ -57,8 +57,9 @@ class ApiClient {
     final decoded = response.body.isEmpty ? null : _decodeBody(response.body);
     if (response.statusCode == 401 && auth && retryAfterRefresh) {
       final refreshed = await _refreshAccessToken();
-      if (refreshed)
+      if (refreshed) {
         return _uploadFile(path, file, auth: auth, retryAfterRefresh: false);
+      }
       await _handleUnauthorized();
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -193,13 +194,16 @@ class ApiClient {
           : null;
       if (data == null ||
           data['accessToken'] is! String ||
-          data['refreshToken'] is! String) return false;
+          data['refreshToken'] is! String) {
+        return false;
+      }
       await store.saveTokens(
         access: data['accessToken'] as String,
         refresh: data['refreshToken'] as String,
       );
-      if (data['user'] is Map)
+      if (data['user'] is Map) {
         await store.saveUser(Map<String, dynamic>.from(data['user'] as Map));
+      }
       return true;
     } catch (_) {
       return false;

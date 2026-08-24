@@ -45,13 +45,15 @@ class _RegisterPageState extends State<RegisterPage> {
       await context
           .read<AuthController>()
           .register(email.text.trim(), password.text, name.text.trim());
-      if (mounted && Navigator.of(context).canPop())
+      if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(context.read<AuthController>().error ??
                 'ثبت‌نام انجام نشد. دوباره تلاش کن.')));
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }

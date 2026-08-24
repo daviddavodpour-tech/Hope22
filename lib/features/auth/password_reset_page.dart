@@ -29,14 +29,16 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
     try {
       await widget.api.request('POST', '/auth/password-reset/request',
           body: {'email': email.text.trim()});
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content:
                 Text('اگر حساب وجود داشته باشد، درخواست بازیابی ثبت شد.')));
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('ثبت درخواست بازیابی انجام نشد.')));
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }

@@ -37,7 +37,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
-    if (auth.isGuest)
+    if (auth.isGuest) {
       return Center(
           child: EmptyState(
               icon: Icons.lock_outline_rounded,
@@ -50,13 +50,15 @@ class _TransactionsPageState extends State<TransactionsPage> {
                           builder: (_) => LoginPage(api: widget.api))),
                   icon: const Icon(Icons.login_rounded),
                   label: const Text('ورود'))));
+    }
     if (future == null) return const Center(child: CircularProgressIndicator());
     return FutureBuilder<dynamic>(
         future: future,
         builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done)
+          if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
-          if (snap.hasError)
+          }
+          if (snap.hasError) {
             return RefreshIndicator(
                 onRefresh: reload,
                 child: ListView(children: const [
@@ -66,10 +68,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       title: 'دریافت فعالیت ناموفق بود',
                       message: 'برای تلاش دوباره صفحه را پایین بکش.')
                 ]));
+          }
           final items = snap.data is List
               ? (snap.data as List).whereType<Map>().toList()
               : <Map>[];
-          if (items.isEmpty)
+          if (items.isEmpty) {
             return RefreshIndicator(
                 onRefresh: reload,
                 child: ListView(children: const [
@@ -80,6 +83,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       message:
                           'با ارسال یا قبول پیشنهاد، جریان کار تو اینجا دیده می‌شود.')
                 ]));
+          }
           return RefreshIndicator(
               onRefresh: reload,
               child: ListView(

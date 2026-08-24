@@ -76,13 +76,15 @@ class _JobDetailPageState extends State<JobDetailPage> {
         'price': double.tryParse(result[0]) ?? 0,
         'message': result[1]
       });
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('پیشنهاد ثبت شد.')));
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('ثبت پیشنهاد انجام نشد.')));
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }

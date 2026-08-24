@@ -55,9 +55,10 @@ class _CreateJobPageState extends State<CreateJobPage> {
         'acceptanceCriteria': accept.text.trim()
       });
       final id = data is Map ? data['id'] : null;
-      if (id == null || id.toString().isEmpty)
+      if (id == null || id.toString().isEmpty) {
         throw const FormatException(
             'Create job response did not contain an id');
+      }
       await widget.api.request('POST', '/jobs/$id/publish', auth: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -65,10 +66,11 @@ class _CreateJobPageState extends State<CreateJobPage> {
         Navigator.pop(context);
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(
                 error.toString().replaceFirst(RegExp(r'^[^:]+:\s*'), ''))));
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
