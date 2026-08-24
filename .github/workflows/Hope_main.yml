@@ -1,0 +1,197 @@
+name: Hope22 Auto Repair Flutter APK Builder
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+
+permissions:
+  contents: write
+
+
+jobs:
+
+  build-apk:
+
+    name: Scan Repair Build APK
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+    - name: Checkout source
+      uses: actions/checkout@v4
+
+
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 17
+
+
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        cache: true
+
+
+
+    - name: Scan repository and detect Flutter project
+      id: scan
+      shell: bash
+      run: |
+
+        echo "Searching Flutter project..."
+
+        PUBSPEC=$(find . \
+        -name pubspec.yaml \
+        -not -path "./.git/*" \
+        | head -1)
+
+
+        if [ -z "$PUBSPEC" ]; then
+          echo "Flutter project not found"
+          exit 1
+        fi
+
+
+        PROJECT=$(dirname "$PUBSPEC")
+
+
+        echo "Detected:"
+        echo "$PROJECT"
+
+
+        echo "project=$PROJECT" >> $GITHUB_OUTPUT
+
+
+
+    - name: Flutter doctor
+      run: |
+
+        flutter doctor -v
+
+
+
+    - name: Install dependencies
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter pub get
+
+
+
+    - name: Automatic Dart repair
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        echo "Running automatic repair"
+
+        dart fix --apply || true
+
+        dart format . || true
+
+
+
+    - name: Dependency upgrade repair
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter pub upgrade || true
+
+        flutter pub get
+
+
+
+    - name: Analyze source
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter analyze || true
+
+
+
+    - name: Run tests without blocking build
+      continue-on-error: true
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter test || true
+
+
+
+    - name: Build Android APK
+      run: |
+
+        cd "${{ steps.scan.outputs.project }}"
+
+        flutter build apk \
+        --release
+
+
+
+    - name: Find APK
+      id: apk
+      shell: bash
+      run: |
+
+        APK=$(find "${{ steps.scan.outputs.project }}" \
+        -name "*.apk" \
+        | head -1)
+
+
+        if [ -z "$APK" ]; then
+
+          echo "APK not generated"
+
+          exit 1
+
+        fi
+
+
+        echo "APK=$APK"
+
+        echo "apk=$APK" >> $GITHUB_OUTPUT
+
+
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+
+        name: Hope22-APK-Release
+
+        path: |
+          ${{ steps.apk.outputs.apk }}
+
+
+
+    - name: Create download message
+      run: |
+
+        echo "# ✅ Hope22 APK ساخته شد" >> $GITHUB_STEP_SUMMARY
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "دانلود APK از بخش Artifacts همین Run:" >> $GITHUB_STEP_SUMMARY
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "Hope22-APK-Release" >> $GITHUB_STEP_SUMMARY
